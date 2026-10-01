@@ -27,7 +27,8 @@
 #    shell history.)
 # 3. List the names you set, then `terraform apply` again and restart the app.
 #    Only list names whose secret exists: an unresolved reference reaches the
-#    app as a non-empty bogus value.
+#    app as its literal "@Microsoft.KeyVault(...)" text, which the app treats
+#    as unset (that provider stays keyless) and logs a warning for.
 
 # key_vault_secrets = [
 #   "GOOGLE_MAPS_SERVER_API_KEY",
@@ -43,10 +44,14 @@
 
 # --- Abuse limits ------------------------------------------------------
 # Per-client-IP caps on the cost-bearing proxies; 0 = unlimited.
-# ratelimit_openai_per_min = 20
+# Defaults: 3 OpenAI / 60 Google (Places + CCTV Street View fallback).
+# ratelimit_openai_per_min = 3
 # ratelimit_google_per_min = 60
 
-# Optional allowlist (default: public). Any entry denies all other sources.
+# IP allowlist (default: public). Any entry denies all other sources.
+# RECOMMENDED while Entra ID sign-in (Easy Auth) is not configured: without
+# it, anyone who finds the URL can spend the OpenAI and Google quotas, bounded
+# only by the per-IP limits above.
 # allowed_ip_ranges = ["203.0.113.7/32"]
 
 # Non-secret settings only.

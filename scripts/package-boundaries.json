@@ -67,6 +67,7 @@
       "server/providers/common/geo.js",
       "server/providers/common/http.js",
       "scripts/google-server-key.mjs",
+      "scripts/secret-env.mjs",
       "src/data/placeProviderPayloads.js",
       "src/data/routeSteps.js",
       "src/sources/httpBody.js",
@@ -164,13 +165,16 @@
       "server/providers/cctv/sources.js",
       "server/providers/cctv/stream.js",
       "server/providers/common/http.js",
+      "server/providers/common/rate-limit.js",
       "src/data/directionText.js",
       "server/providers/common/geo.js",
       "server/providers/places/google-key.js",
       "scripts/google-server-key.mjs",
+      "scripts/secret-env.mjs",
       "src/data/cctvFootprint.js",
       "src/sources/cctvTypes.js",
-      "src/sources/httpBody.js"
+      "src/sources/httpBody.js",
+      "src/sources/rateLimit.js"
     ],
     "external": []
   },

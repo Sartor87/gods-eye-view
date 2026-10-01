@@ -14,10 +14,12 @@
 !src/
 !public/
 !config/
-# Imported at runtime by server/providers/places/google-key.js and
-# server/standalone/key-setup.js; nothing else under scripts/ is needed.
+# Imported at runtime by server/providers/places/google-key.js,
+# server/standalone/key-setup.js and server/standalone/vite.config.js;
+# nothing else under scripts/ is needed.
 !scripts/google-server-key.mjs
 !scripts/pinokio-environment.mjs
+!scripts/secret-env.mjs
 
 # Re-exclude anything sensitive or generated that could sit inside an allowed
 # directory (later rules win).
