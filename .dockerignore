@@ -1,0 +1,17 @@
+node_modules
+dist
+.env
+.env.*
+*.log
+screenshots/
+qa-shots/
+output/
+.gev-logs/
+.gev-cache/
+.git
+.gitattributes
+.github
+.vs
+3d-models/
+pinokio/ENVIRONMENT
+pinokio/.installed
