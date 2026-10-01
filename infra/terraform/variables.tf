@@ -64,9 +64,15 @@ variable "key_vault_soft_delete_retention_days" {
 # --- Abuse limits ------------------------------------------------------
 
 variable "ratelimit_openai_per_min" {
-  description = "GEV_RATELIMIT_OPENAI_PER_MIN: requests/min per client IP to the OpenAI cost endpoints (Realtime token, HUD summary). 0 = unlimited."
+  description = "GEV_RATELIMIT_OPENAI_PER_MIN: requests/min per client IP to the OpenAI Realtime token endpoint (voice). 0 = unlimited."
   type        = number
   default     = 3
+}
+
+variable "ratelimit_hud_per_min" {
+  description = "GEV_RATELIMIT_HUD_PER_MIN: requests/min per client IP to the OpenAI HUD summary endpoint. A separate bucket from the voice token, so HUD polling cannot starve the mic. 0 = unlimited."
+  type        = number
+  default     = 6
 }
 
 variable "ratelimit_google_per_min" {

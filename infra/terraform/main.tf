@@ -65,9 +65,11 @@ locals {
     WEBSITES_PORT = "8080"
 
     # Per-client-IP caps for the cost-bearing proxies (OpenAI Realtime token,
-    # HUD summary, Google Places). The code defaults to unlimited for local
-    # use; a public deployment must not. "0" disables a cap.
+    # HUD summary — separate buckets — and Google Places + Street View). The
+    # code defaults to unlimited for local use; a public deployment must not.
+    # "0" disables a cap.
     GEV_RATELIMIT_OPENAI_PER_MIN = tostring(var.ratelimit_openai_per_min)
+    GEV_RATELIMIT_HUD_PER_MIN    = tostring(var.ratelimit_hud_per_min)
     GEV_RATELIMIT_GOOGLE_PER_MIN = tostring(var.ratelimit_google_per_min)
   }
 
