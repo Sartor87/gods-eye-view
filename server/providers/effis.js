@@ -13,8 +13,51 @@
 import path from 'node:path';
 import { promises as fsp } from 'node:fs';
 
+/** Hard cap on upstream features per snapshot (WFS COUNT and normalized rows). */
+export const MAX_FEATURES = 2000;
+/** Hard cap on the upstream response body, in bytes (8 MiB). */
+export const MAX_BYTES = 8 * 1024 * 1024;
+
 const WFS_URL =
-  'https://maps.effis.emergency.copernicus.eu/effis?MAP=/mnt/nfs/mapfiles/effis.map&SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature&TYPENAMES=ms:modis.ba.poly.week&OUTPUTFORMAT=GEOJSON';
+  'https://maps.effis.emergency.copernicus.eu/effis?MAP=/mnt/nfs/mapfiles/effis.map&SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature&TYPENAMES=ms:modis.ba.poly.week&OUTPUTFORMAT=GEOJSON' +
+  `&COUNT=${MAX_FEATURES}`;
+
+/**
+ * Read a fetch Response body as text, refusing anything over `maxBytes`.
+ * A declared Content-Length over the cap is rejected before reading; otherwise
+ * the stream is counted chunk by chunk and cancelled as soon as it overflows,
+ * so an oversized upstream can never be buffered whole.
+ * @param {Response} res
+ * @param {number} maxBytes
+ * @returns {Promise<string>}
+ */
+async function readBodyCapped(res, maxBytes) {
+  const declared = Number(res.headers?.get?.('content-length'));
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    await res.body?.cancel?.().catch(() => {});
+    throw new Error('response_too_large');
+  }
+  if (!res.body?.getReader) {
+    const text = await res.text();
+    if (Buffer.byteLength(text, 'utf8') > maxBytes)
+      throw new Error('response_too_large');
+    return text;
+  }
+  const reader = res.body.getReader();
+  const chunks = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => {});
+      throw new Error('response_too_large');
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks, total).toString('utf8');
+}
 
 /** Compute a polygon's centroid as a simple coordinate average (good enough for a marker anchor, not for area). */
 function centroidOf(ring) {
@@ -80,7 +123,12 @@ export function normalizeEffisFeatureCollection(geojson) {
  * `AccessConstraints: None`.
  *
  * Routes:
- *   GET /api/effis/burnt-areas → {fetchedAt, stale, ttlMs, count, areas}
+ *   GET /api/effis/burnt-areas → {fetchedAt, stale, ttlMs, count, truncated, areas}
+ *
+ * Bounded snapshot: the WFS request carries COUNT=MAX_FEATURES, the body is
+ * read with a MAX_BYTES cap (over cap → failure, stale cache served if any),
+ * and normalized rows are capped at MAX_FEATURES. `truncated` is true when the
+ * upstream hit the COUNT cap or rows were cut, so the client can say so.
  *
  * @returns {import('vite').Plugin}
  */
@@ -89,7 +137,7 @@ export function effisBurntAreasProxy() {
   const CACHE_DIR = path.join(process.cwd(), '.gev-cache');
   const CACHE_PATH = path.join(CACHE_DIR, 'effis-burnt-areas.json');
 
-  /** @type {?{at: number, areas: Array<object>}} */
+  /** @type {?{at: number, truncated?: boolean, areas: Array<object>}} */
   let mem = null;
   /** @type {?Promise<void>} memoized so concurrent cold-start callers share one read */
   let diskReadPromise = null;
@@ -126,15 +174,19 @@ export function effisBurntAreasProxy() {
   async function refresh() {
     const res = await fetch(WFS_URL, { signal: AbortSignal.timeout(90_000) });
     if (!res.ok) throw new Error(`EFFIS HTTP ${res.status}`);
-    const geojson = await res.json();
+    const geojson = JSON.parse(await readBodyCapped(res, MAX_BYTES));
     // A 200 that isn't a FeatureCollection (MapServer exception, HTML error
     // page as JSON, …) is a failure — throw so getFresh keeps the previous
     // cache (served stale) instead of caching an empty "healthy" result.
     // A valid FeatureCollection with zero features is still a real result.
     if (!Array.isArray(geojson?.features))
       throw new Error('invalid_feature_collection');
-    const areas = normalizeEffisFeatureCollection(geojson);
-    const entry = { at: Date.now(), areas };
+    const normalized = normalizeEffisFeatureCollection(geojson);
+    const areas = normalized.slice(0, MAX_FEATURES);
+    const truncated =
+      geojson.features.length >= MAX_FEATURES ||
+      areas.length < normalized.length;
+    const entry = { at: Date.now(), truncated, areas };
     await writeDisk(entry);
     return entry;
   }
@@ -179,6 +231,7 @@ export function effisBurntAreasProxy() {
             stale,
             ttlMs: TTL_MS,
             count: entry.areas.length,
+            truncated: entry.truncated === true,
             areas: entry.areas,
           }),
         );

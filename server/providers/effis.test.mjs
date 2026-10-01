@@ -4,6 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import {
+  MAX_BYTES,
+  MAX_FEATURES,
   effisBurntAreasProxy,
   normalizeEffisFeatureCollection,
 } from './effis.js';
@@ -225,10 +227,15 @@ async function withProxy(fn, { disk } = {}) {
   }
 }
 
-const jsonResponse = (body) => ({
-  ok: true,
-  status: 200,
-  json: async () => body,
+// A real WHATWG Response, so the proxy's streamed, byte-capped body read is
+// exercised exactly as it would be against the upstream.
+const jsonResponse = (body, init) =>
+  new Response(JSON.stringify(body), { status: 200, ...init });
+
+const polygonFeature = (id) => ({
+  type: 'Feature',
+  properties: { id: String(id) },
+  geometry: { type: 'Polygon', coordinates: [VALID_RING] },
 });
 
 test('FINAL-FIX: a 200 response that is not a FeatureCollection is an upstream failure, not an empty result', async () => {
@@ -297,4 +304,110 @@ test('FINAL-FIX: concurrent cold-start requests share one disk read and do not r
     },
     { disk: { at: Date.now(), areas: [diskArea] } },
   );
+});
+
+test('T1: the proxy bounds the upstream request with WFS COUNT=MAX_FEATURES', async () => {
+  assert.equal(MAX_FEATURES, 2000);
+  await withProxy(async ({ request, stubFetch }) => {
+    let requestedUrl = null;
+    stubFetch(async (url) => {
+      requestedUrl = String(url);
+      return jsonResponse({ type: 'FeatureCollection', features: [] });
+    });
+    await request();
+    assert.ok(requestedUrl, 'upstream must be fetched on a cold cache');
+    assert.equal(new URL(requestedUrl).searchParams.get('COUNT'), '2000');
+  });
+});
+
+test('T1: an upstream body over MAX_BYTES is rejected (503 on a cold cache), never parsed or cached', async () => {
+  assert.equal(MAX_BYTES, 8 * 1024 * 1024);
+  await withProxy(async ({ request, stubFetch }) => {
+    const chunk = new Uint8Array(1024 * 1024).fill(0x20);
+    let pulled = 0;
+    stubFetch(
+      async () =>
+        new Response(
+          new ReadableStream({
+            pull(controller) {
+              pulled += 1;
+              // Unbounded stream: only a byte cap stops it.
+              if (pulled > 64) controller.close();
+              else controller.enqueue(chunk);
+            },
+          }),
+          { status: 200 },
+        ),
+    );
+    const response = await request();
+    assert.equal(response.status, 503);
+    assert.deepEqual(response.body, { error: 'upstream_unavailable' });
+    assert.ok(pulled <= 10, `read stopped near the cap, pulled ${pulled} MiB`);
+  });
+});
+
+test('T1: an over-cap Content-Length is rejected before reading and the stale cache is served', async () => {
+  const oldArea = {
+    id: '1',
+    lon: 10,
+    lat: 45,
+    polygon: VALID_RING,
+    areaHa: 5,
+    fireDate: null,
+  };
+  await withProxy(
+    async ({ request, stubFetch }) => {
+      stubFetch(async () =>
+        jsonResponse(
+          { type: 'FeatureCollection', features: [] },
+          { headers: { 'content-length': String(MAX_BYTES + 1) } },
+        ),
+      );
+      const response = await request();
+      assert.equal(response.status, 200);
+      assert.equal(response.body.stale, true);
+      assert.deepEqual(response.body.areas, [oldArea]);
+    },
+    { disk: { at: Date.now() - 2 * 60 * 60_000, areas: [oldArea] } },
+  );
+});
+
+test('T1: rows are capped at MAX_FEATURES and the response is flagged truncated', async () => {
+  await withProxy(async ({ request, stubFetch }) => {
+    const features = Array.from({ length: MAX_FEATURES + 5 }, (_, i) =>
+      polygonFeature(i + 1),
+    );
+    stubFetch(async () => jsonResponse({ type: 'FeatureCollection', features }));
+    const response = await request();
+    assert.equal(response.status, 200);
+    assert.equal(response.body.count, MAX_FEATURES);
+    assert.equal(response.body.areas.length, MAX_FEATURES);
+    assert.equal(response.body.truncated, true);
+  });
+});
+
+test('T1: an upstream page that hits exactly the COUNT cap is flagged truncated', async () => {
+  await withProxy(async ({ request, stubFetch }) => {
+    const features = Array.from({ length: MAX_FEATURES }, (_, i) =>
+      polygonFeature(i + 1),
+    );
+    stubFetch(async () => jsonResponse({ type: 'FeatureCollection', features }));
+    const response = await request();
+    assert.equal(response.body.count, MAX_FEATURES);
+    assert.equal(response.body.truncated, true);
+  });
+});
+
+test('T1: a small upstream snapshot is reported as not truncated', async () => {
+  await withProxy(async ({ request, stubFetch }) => {
+    stubFetch(async () =>
+      jsonResponse({
+        type: 'FeatureCollection',
+        features: [polygonFeature(1), polygonFeature(2)],
+      }),
+    );
+    const response = await request();
+    assert.equal(response.body.count, 2);
+    assert.equal(response.body.truncated, false);
+  });
 });
