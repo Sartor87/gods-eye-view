@@ -1,5 +1,6 @@
 import { applicationHtmlPlugin } from './application-html.js';
 import cesium from 'vite-plugin-cesium';
+import { isIP } from 'node:net';
 
 const LOOPBACK_ALLOWED_HOSTS = ['localhost', '127.0.0.1', '.local'];
 
@@ -23,6 +24,66 @@ export function allowedHostsFromEnv(env = {}) {
     .filter((host) => host && host !== '*' && host.toLowerCase() !== 'true');
 }
 
+/**
+ * Whether a Host header names an allowed host. Mirrors Vite's own
+ * `allowedHosts` semantics: IP literals and `localhost`/`*.localhost` always
+ * pass; a list entry matches exactly, and an entry with a leading dot also
+ * matches its subdomains.
+ *
+ * @param {string|undefined} hostHeader
+ * @param {string[]} allowList
+ * @returns {boolean}
+ */
+export function isAllowedHost(hostHeader, allowList) {
+  const value = String(hostHeader || '').trim();
+  if (!value) return false;
+  if (value.startsWith('[')) {
+    const end = value.indexOf(']');
+    return end > 0 && isIP(value.slice(1, end)) === 6;
+  }
+  const colon = value.indexOf(':');
+  const hostname = (colon === -1 ? value : value.slice(0, colon)).toLowerCase();
+  if (isIP(hostname) === 4) return true;
+  if (hostname === 'localhost' || hostname.endsWith('.localhost')) return true;
+  return allowList.some((entry) => {
+    const allowed = String(entry).toLowerCase();
+    if (allowed === hostname) return true;
+    return (
+      allowed.startsWith('.') &&
+      (allowed.slice(1) === hostname || hostname.endsWith(allowed))
+    );
+  });
+}
+
+/**
+ * Host allow-list for `/api/*`, mounted ahead of every provider middleware.
+ * Vite's own host check is added after the middlewares plugins register in
+ * configureServer/configurePreviewServer, so without this the providers
+ * would answer a DNS-rebinding Host before Vite ever looked at it.
+ *
+ * @param {string[]} allowList
+ * @returns {import('vite').Plugin}
+ */
+export function apiHostGuardPlugin(allowList) {
+  const guard = (req, res, next) => {
+    if (isAllowedHost(req.headers?.host, allowList)) return next();
+    res.writeHead(403, {
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-store',
+    });
+    res.end(JSON.stringify({ error: 'Host not allowed' }));
+  };
+  const install = (server) => {
+    server.middlewares.use('/api', guard);
+  };
+  return {
+    name: 'gev-api-host-guard',
+    enforce: 'pre',
+    configureServer: { order: 'pre', handler: install },
+    configurePreviewServer: { order: 'pre', handler: install },
+  };
+}
+
 /** Build browser assets with explicit inputs; never load environment or providers. */
 export function createBrowserViteConfig({
   plugins = [],
@@ -40,7 +101,14 @@ export function createBrowserViteConfig({
     ...new Set([...LOOPBACK_ALLOWED_HOSTS, ...allowedHosts]),
   ];
   return {
-    plugins: [cesium(), applicationHtmlPlugin(), ...plugins],
+    plugins: [
+      cesium(),
+      applicationHtmlPlugin(),
+      ...plugins,
+      // Last in the list, first to run: `enforce`/`order: 'pre'` mount it
+      // ahead of every provider's /api middleware.
+      apiHostGuardPlugin(hostAllowList),
+    ],
     ...(publicDir === undefined ? {} : { publicDir }),
     // A production build must not clean the dependency cache a running dev
     // server is still serving optimized module URLs from.

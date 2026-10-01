@@ -16,6 +16,9 @@ RUN mkdir -p /app/.gev-cache /app/.gev-logs && chown -R node:node /app
 USER node
 
 COPY --chown=node:node package.json package-lock.json ./
+# Puppeteer is a dev tool for local QA scripts; the server never launches a
+# browser, so skip its ~170 MB Chromium download at install time.
+ENV PUPPETEER_SKIP_DOWNLOAD=1
 RUN npm ci
 
 COPY --chown=node:node . .

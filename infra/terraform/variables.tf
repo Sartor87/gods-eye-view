@@ -66,11 +66,11 @@ variable "key_vault_soft_delete_retention_days" {
 variable "ratelimit_openai_per_min" {
   description = "GEV_RATELIMIT_OPENAI_PER_MIN: requests/min per client IP to the OpenAI cost endpoints (Realtime token, HUD summary). 0 = unlimited."
   type        = number
-  default     = 20
+  default     = 3
 }
 
 variable "ratelimit_google_per_min" {
-  description = "GEV_RATELIMIT_GOOGLE_PER_MIN: requests/min per client IP to the Google Places cost endpoints. 0 = unlimited."
+  description = "GEV_RATELIMIT_GOOGLE_PER_MIN: requests/min per client IP to the Google cost endpoints (Places, CCTV Street View fallback). 0 = unlimited."
   type        = number
   default     = 60
 }
