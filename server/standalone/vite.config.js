@@ -1,6 +1,9 @@
 import { fileURLToPath } from 'node:url';
 import { defineConfig, loadEnv } from 'vite';
-import { createBrowserViteConfig } from '../../build/vite.js';
+import {
+  allowedHostsFromEnv,
+  createBrowserViteConfig,
+} from '../../build/vite.js';
 import { localProviderPlugins } from '../providers/local.js';
 import { apiNotFoundPlugin } from './api-not-found.js';
 
@@ -18,6 +21,7 @@ export default defineConfig(({ command, mode }) => {
     cesiumToken: process.env.CESIUM_ION_TOKEN,
     host: process.env.HOST,
     port: process.env.PORT,
+    allowedHosts: allowedHostsFromEnv(process.env),
     command,
   });
 });
