@@ -168,7 +168,10 @@ The Wildfire Burnt Areas (EFFIS) layer is **fetched live at runtime**: the
 polygons (`ms:modis.ba.poly.week`) from the EFFIS WFS and caches them for 1 hour
 in memory and in `.gev-cache/` (gitignored), serving the last good copy when the
 slow, occasionally failing upstream does not answer. No key is required and
-nothing is bundled. Per the [EFFIS data licence](https://forest-fire.emergency.copernicus.eu/about-effis/data-license)
+nothing is bundled. The snapshot is bounded server-side, so browsers never
+download a large extract: the WFS request is capped at 2,000 features (`COUNT`),
+the upstream body at 8 MiB, and the response carries a `truncated` flag when
+either limit cut the result. Per the [EFFIS data licence](https://forest-fire.emergency.copernicus.eu/about-effis/data-license)
 (which applies the Commission Decision of 12 December 2011 on the reuse of
 Commission documents), reuse needs credit and an indication of changes; logos
 and trade marks, and third-party content, are outside that reuse policy.
