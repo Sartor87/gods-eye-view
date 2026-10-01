@@ -45,13 +45,23 @@ export function cctvProxy({ sourceRoot = process.cwd() } = {}) {
   /** Live HLS strategies (see ./cctv/stream.js). Shared across dev and preview. */
   const puller = createHlsPuller();
   /**
-   * Street View frames per registered camera. A camera's pose is fixed by the
-   * server catalog, so one frame per camera is all the paid API can return;
-   * bounded so a large catalog cannot hold every frame in memory.
+   * Optional Street View frames per registered camera. OFF by default:
+   * Google Maps Platform terms generally prohibit caching or storing Street
+   * View content, so an operator must confirm their terms allow it before
+   * setting GEV_STREETVIEW_CACHE_TTL_MS (> 0 enables it, in milliseconds).
+   * Bounded so a large catalog cannot hold every frame in memory.
    */
   const streetViewCache = new Map();
-  const STREET_VIEW_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
   const STREET_VIEW_CACHE_MAX_ENTRIES = 256;
+  // Read on first use, after the standalone environment has loaded.
+  let streetViewCacheTtlMs;
+  const streetViewTtl = () => {
+    if (streetViewCacheTtlMs === undefined) {
+      const ttl = Number(process.env.GEV_STREETVIEW_CACHE_TTL_MS);
+      streetViewCacheTtlMs = Number.isFinite(ttl) && ttl > 0 ? ttl : 0;
+    }
+    return streetViewCacheTtlMs;
+  };
   // Built on first use, after the standalone environment has loaded.
   // undefined = not built yet; null = unlimited; fn = active limiter.
   let streetViewLimiter;
@@ -72,12 +82,14 @@ export function cctvProxy({ sourceRoot = process.cwd() } = {}) {
     return entry.frame;
   };
   const cacheStreetView = (cameraId, frame) => {
+    const ttlMs = streetViewTtl();
+    if (!ttlMs) return;
     streetViewCache.delete(cameraId);
     if (streetViewCache.size >= STREET_VIEW_CACHE_MAX_ENTRIES)
       streetViewCache.delete(streetViewCache.keys().next().value);
     streetViewCache.set(cameraId, {
       frame,
-      expiresAt: Date.now() + STREET_VIEW_CACHE_TTL_MS,
+      expiresAt: Date.now() + ttlMs,
     });
   };
 

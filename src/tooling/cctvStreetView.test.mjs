@@ -65,6 +65,7 @@ function setup(t, env = {}) {
     'GOOGLE_MAPS_API_KEY',
     'GEV_RATELIMIT_GOOGLE_PER_MIN',
     'WEBSITE_INSTANCE_ID',
+    'GEV_STREETVIEW_CACHE_TTL_MS',
   ]) {
     const previous = process.env[name];
     if (name in env) process.env[name] = env[name];
@@ -141,9 +142,21 @@ test('T3: a known camera uses its registered pose and ignores query coordinates'
   assert.notEqual(sv.searchParams.get('pitch'), '5');
 });
 
-test('T3: Street View frames are cached per camera', async (t) => {
+test('T3: Street View frames are not cached by default (Google terms)', async (t) => {
   const { call, calls } = setup(t, {
     GOOGLE_MAPS_SERVER_API_KEY: 'server-fixture-key',
+  });
+  const first = await call('/frame/paris-1');
+  const second = await call('/frame/paris-1?ts=2');
+  assert.equal(first.status, 200);
+  assert.equal(second.status, 200);
+  assert.equal(calls.length, 2);
+});
+
+test('T3: GEV_STREETVIEW_CACHE_TTL_MS opts in to a per-camera cache', async (t) => {
+  const { call, calls } = setup(t, {
+    GOOGLE_MAPS_SERVER_API_KEY: 'server-fixture-key',
+    GEV_STREETVIEW_CACHE_TTL_MS: '60000',
   });
   const first = await call('/frame/paris-1');
   const second = await call('/frame/paris-1?ts=2');
