@@ -19,7 +19,8 @@ import {
 import { sanitizeCctvRangeHeader } from './cctv/range.js';
 import { createHlsPuller } from './cctv/stream.js';
 import { googleServerApiKey } from './places/google-key.js';
-import { makeOptInRateLimiter, clientKey } from './common/rate-limit.js';
+import { clientKey } from './common/rate-limit.js';
+import { googleRateLimiter } from './common/google-rate-limit.js';
 export { CCTV_FRAME_FETCH_TIMEOUT_MS, fetchCctvImageFromUpstream };
 /**
  * Vite plugin: CCTV camera proxy with source registry, frame/media serving,
@@ -62,15 +63,11 @@ export function cctvProxy({ sourceRoot = process.cwd() } = {}) {
     }
     return streetViewCacheTtlMs;
   };
-  // Built on first use, after the standalone environment has loaded.
-  // undefined = not built yet; null = unlimited; fn = active limiter.
-  let streetViewLimiter;
+  // The same per-IP Google budget the Places routes spend (one limiter for
+  // GEV_RATELIMIT_GOOGLE_PER_MIN), read on use after the env has loaded.
   const allowStreetView = (req) => {
-    if (streetViewLimiter === undefined)
-      streetViewLimiter = makeOptInRateLimiter(
-        process.env.GEV_RATELIMIT_GOOGLE_PER_MIN,
-      );
-    return !streetViewLimiter || streetViewLimiter(clientKey(req));
+    const limiter = googleRateLimiter();
+    return !limiter || limiter(clientKey(req));
   };
   const cachedStreetView = (cameraId) => {
     const entry = streetViewCache.get(cameraId);
@@ -517,14 +514,24 @@ export function cctvProxy({ sourceRoot = process.cwd() } = {}) {
           decodeURIComponent(url.pathname.replace('/frame/', '').trim()) ||
           'camera';
         const source = sourceById.get(cameraId);
-        // Unknown ids get nothing: no upstream fetch, no paid Street View
+        // Unknown ids (a camera dropped by a catalog refresh, a client
+        // CAMERA_SEEDS fallback) get the synthetic frame so the <img> still
+        // renders — but nothing else: no upstream fetch, no paid Street View
         // call, no health entry (the map would otherwise grow per guess).
         if (!source) {
-          res.writeHead(404, {
-            'Content-Type': 'application/json',
+          res.writeHead(200, {
+            'Content-Type': 'image/svg+xml',
             'Cache-Control': 'no-store',
+            'X-CCTV-Source': 'synthetic',
           });
-          res.end(JSON.stringify({ error: 'not found' }));
+          res.end(
+            buildSyntheticCctvSvg({
+              cameraId,
+              label: url.searchParams.get('label') || cameraId,
+              city: url.searchParams.get('city') || '',
+              status: 'CAMERA NOT IN CATALOG',
+            }),
+          );
           return;
         }
         const label = url.searchParams.get('label') || source.name || cameraId;
@@ -567,21 +574,15 @@ export function cctvProxy({ sourceRoot = process.cwd() } = {}) {
         }
 
         let sv = cachedStreetView(cameraId);
+        // Over the Google budget falls through to the synthetic frame below
+        // rather than a 429 the <img> would render as broken.
         if (
           !sv &&
           googleServerApiKey() &&
           Number.isFinite(lat) &&
-          Number.isFinite(lon)
+          Number.isFinite(lon) &&
+          allowStreetView(req)
         ) {
-          if (!allowStreetView(req)) {
-            res.writeHead(429, {
-              'Content-Type': 'application/json',
-              'Cache-Control': 'no-store',
-              'Retry-After': '5',
-            });
-            res.end(JSON.stringify({ error: 'Rate limit exceeded' }));
-            return;
-          }
           sv = await streetViewFallback({ lat, lon, heading, fov, pitch });
           if (sv?.ok) cacheStreetView(cameraId, sv);
         }

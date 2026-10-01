@@ -23,6 +23,46 @@ export function makeOptInRateLimiter(envValue) {
   });
 }
 
+/** name -> { value, limiter } for envRateLimiter. */
+const envLimiters = new Map();
+
+/**
+ * The shared opt-in limiter for one environment variable. Read on each call
+ * (never at import: `.env` is applied to process.env after providers load),
+ * and memoised per variable, so every route that names the same variable
+ * spends ONE per-IP budget. A changed value builds a fresh limiter.
+ *
+ * @param {string} name - Env var holding requests/min/IP.
+ * @param {string} [fallbackName] - Var whose value is used when `name` is unset.
+ * @returns {((key:string)=>boolean)|null} Limiter, or null when unlimited.
+ */
+export function envRateLimiter(name, fallbackName) {
+  const raw = process.env[name];
+  const value = String(
+    (raw === undefined || raw === '') && fallbackName
+      ? (process.env[fallbackName] ?? '')
+      : (raw ?? ''),
+  );
+  const cached = envLimiters.get(name);
+  if (cached && cached.value === value) return cached.limiter;
+  const limiter = makeOptInRateLimiter(value);
+  envLimiters.set(name, { value, limiter });
+  return limiter;
+}
+
+/**
+ * Whole seconds a refused client should wait, for a `Retry-After` header.
+ * Uses the limiter's own window when it can tell, else a constant.
+ *
+ * @param {((key:string)=>boolean)&{retryAfterMs?:(key:string)=>number}} limiter
+ * @param {string} key
+ * @returns {string}
+ */
+export function retryAfterSeconds(limiter, key) {
+  const ms = Number(limiter?.retryAfterMs?.(key));
+  return String(Number.isFinite(ms) && ms > 0 ? Math.ceil(ms / 1000) : 5);
+}
+
 /**
  * Strip a port (and IPv6 brackets) from one X-Forwarded-For hop. App Service
  * appends `ip:port` for IPv4 and `[ip]:port` for IPv6; a bare IPv6 address

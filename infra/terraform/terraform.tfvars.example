@@ -44,8 +44,10 @@
 
 # --- Abuse limits ------------------------------------------------------
 # Per-client-IP caps on the cost-bearing proxies; 0 = unlimited.
-# Defaults: 3 OpenAI / 60 Google (Places + CCTV Street View fallback).
+# Defaults: 3 OpenAI voice token / 6 HUD summary (separate buckets) /
+# 60 Google (Places + CCTV Street View fallback, one shared budget).
 # ratelimit_openai_per_min = 3
+# ratelimit_hud_per_min    = 6
 # ratelimit_google_per_min = 60
 
 # IP allowlist (default: public). Any entry denies all other sources.

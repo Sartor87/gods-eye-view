@@ -21,7 +21,30 @@ export function allowedHostsFromEnv(env = {}) {
   ];
   return hosts
     .map((host) => String(host || '').trim())
-    .filter((host) => host && host !== '*' && host.toLowerCase() !== 'true');
+    .filter(
+      (host) =>
+        host &&
+        host !== '*' &&
+        host.toLowerCase() !== 'true' &&
+        // App Service hands over an unresolved reference as literal text.
+        !host.startsWith('@Microsoft.KeyVault('),
+    );
+}
+
+/**
+ * The configured bind host as an allow-list entry (`HOST=DESKTOP-X` lets the
+ * machine's own name reach /api, as Vite itself would). Wildcard binds
+ * (`0.0.0.0`, `::`, `*`, `true`) name no host and add nothing.
+ *
+ * @param {unknown} host
+ * @returns {string[]}
+ */
+function bindHostEntries(host) {
+  if (typeof host !== 'string') return [];
+  const value = host.trim();
+  if (!value || value === '*' || value.toLowerCase() === 'true') return [];
+  if (isIP(value.replace(/^\[|\]$/g, ''))) return []; // IP literals already pass
+  return [value];
 }
 
 /**
@@ -98,7 +121,11 @@ export function createBrowserViteConfig({
   // Never `true`: even on a wildcard bind (container, 0.0.0.0) Vite's host
   // check stays on and accepts only loopback plus explicit deployment hosts.
   const hostAllowList = [
-    ...new Set([...LOOPBACK_ALLOWED_HOSTS, ...allowedHosts]),
+    ...new Set([
+      ...LOOPBACK_ALLOWED_HOSTS,
+      ...allowedHosts,
+      ...bindHostEntries(host),
+    ]),
   ];
   return {
     plugins: [
